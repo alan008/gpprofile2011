@@ -4,6 +4,10 @@
 
 GpProfile is a source code instrumenting profiler for Delphi.
 
+Source codes for gpprofile2011 can be compiled using Delphi 2007 and are not Delphi 2009 (and newer) compliant. 
+
+Executable file (gpprof.exe) is able to work and profile sources for Delphi 2009, 2010, XE as well as the sources for older versions of Delphi.
+
 = Details =
 
 Easy as 1-2-3:
