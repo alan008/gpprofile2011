@@ -8,7 +8,9 @@ uses
   Registry, Messages, Classes, Forms, Windows, SysUtils, Graphics, Controls,
   Dialogs, StdCtrls, Menus, ComCtrls, GpParser, ExtCtrls, GpCheckLst, gpMRU,
   ActnList, ImgList, Buttons, ToolWin, gppResults, Grids,
-  gpArrowListView, mwPasSyn, mwCustomEdit, mwHighlighter, DProjUnit;
+  gpArrowListView, DProjUnit, SynEdit,
+  SynEditHighlighter, SynEditCodeFolding, SynHighlighterPas, System.ImageList,
+  System.Actions;
 
 const
   WM_ReloadProfile = WM_USER;
@@ -184,8 +186,7 @@ type
     Label1: TLabel;
     cbxSelectThreadClass: TComboBox;
     lvClasses: TGpArrowListView;
-    mwSource: TmwCustomEdit;
-    mwPasSyn1: TmwPasSyn;
+    sourceCodeEdit: TSynEdit;
     pnlBrowser: TPanel;
     ToolBar3: TToolBar;
     ToolButton18: TToolButton;
@@ -208,6 +209,7 @@ type
     actHelpVisitForum: TAction;
     actHelpJoinMailingList: TAction;
     OpenDialog1: TOpenDialog;
+    SynPasSyn: TSynPasSyn;
     procedure FormCreate(Sender: TObject);
     procedure MRUClick(Sender: TObject; LatestFile: String);
     procedure FormDestroy(Sender: TObject);
@@ -391,7 +393,7 @@ type
     function  GetOutputDir(const aProject: string): string;
     procedure FindMyDelphi;
     procedure CloseDelphiHandles;
-    procedure LoadSource(fileName: string; focusOn: integer);
+    procedure LoadSource(fileName: AnsiString; focusOn: integer);
     procedure ClearSource;
     procedure ReloadSource;
     procedure ExportTo(fileName: string; exportProcs, exportClasses, exportUnits, exportThreads, exportCSV: boolean);
@@ -451,6 +453,7 @@ uses
   uDbgIntf,
 {$ENDIF}
   BdsProjUnit,
+  BdsVersions,
   IniFiles,
   GpString,
   GpProfH,
@@ -462,6 +465,7 @@ uses
   gppAbout,
   gppExport,
   gppCallGraph,
+  UITypes,
   StrUtils; {jb}
 
 {$R *.DFM}
@@ -521,27 +525,6 @@ begin
   end
   else Result := true;
 end; { EnumFindMyDelphi }
-
-function DelphiVerToBDSVer(const aDelphiVer: string): string;
-begin
-  Result := '';
-  if aDelphiVer = '2005' then
-    Result := '3.0'
-  else if aDelphiVer = '2006' then
-    Result := '4.0'
-  else if aDelphiVer = '2007' then
-    Result := '5.0'
-  else if aDelphiVer = '2009' then
-    Result := '6.0'
-  else if aDelphiVer = '2010' then
-    Result := '7.0'
-  else if aDelphiVer = 'XE' then
-    Result := '8.0'
-  else if aDelphiVer = 'XE2' then
-    Result:= '9.0'
-  else if aDelphiVer = 'XE3' then
-    Result:= '10.0';
-end;
 
 {========================= TfrmMain =========================}
 
@@ -692,7 +675,7 @@ begin
   clbProcs.Color                     := clBtnFace;
   clbProcs.Enabled                   := false;
   if PageControl1.ActivePage = tabInstrumentation then
-    mwSource.Color := clBtnFace;
+    sourceCodeEdit.Color := clBtnFace;
 end; { TfrmMain.DisablePC }
 
 procedure TfrmMain.EnablePC;
@@ -709,7 +692,7 @@ begin
   clbProcs.Color                     := clWindow;
   clbProcs.Enabled                   := true;
   if PageControl1.ActivePage = tabInstrumentation then
-    mwSource.Color := mwPasSyn1.SpaceAttri.Background;
+    sourceCodeEdit.Color := SynPasSyn.SpaceAttri.Background;
   SetSource;
 end; { TfrmMain.EnablePC }
 
@@ -854,7 +837,7 @@ begin
   cbxSelectThreadClass.Color         := clBtnFace;
   cbxSelectThreadUnit.Color          := clBtnFace;
   if PageControl1.ActivePage = tabAnalysis then
-    mwSource.Color := clBtnFace;
+    sourceCodeEdit.Color := clBtnFace;
 end; { TfrmMain.DisablePC2 }
 
 procedure TfrmMain.EnablePC2;
@@ -873,7 +856,7 @@ begin
     cbxSelectThreadClass.Color := clWindow;
     cbxSelectThreadUnit.Color  := clWindow;
     if PageControl1.ActivePage = tabAnalysis then
-      mwSource.Color := mwPasSyn1.SpaceAttri.Background;
+      sourceCodeEdit.Color := SynPasSyn.SpaceAttri.Background;
     SetSource;
   end;
 end;
@@ -897,18 +880,7 @@ begin
             GetKeyNames(vTempSL);
             for i := 0 to vTempSL.Count-1 do
             begin
-              if vTempSL[i] = '10.0' then
-                settings.Add('XE3')
-              else if vTempSL[i] = '9.0' then
-                settings.Add('XE2')
-              else if vTempSL[i] = '8.0' then
-                settings.Add('XE')
-              else if vTempSL[i] = '7.0' then
-                settings.Add('2010')
-              else if vTempSL[i] = '6.0' then
-                settings.Add('2009')
-              else
-                settings.Add('Embarcadero BDS ' + vTempSL[i]);
+              settings.Add(BdsVerToDephiVer(vTempSL[i]));
             end;
           finally
             vTempSL.Free;
@@ -2178,8 +2150,8 @@ end;
 procedure TfrmMain.SetCaption;
 begin
   if PageControl1.ActivePage = tabInstrumentation
-    then Caption := 'GpProfile 2011'+IFF(currentProject <> '',' - '+currentProject,'')
-    else Caption := 'GpProfile 2011'+IFF(currentProfile <> '',' - '+currentProfile,'')+IFF(loadCanceled,' (incomplete)','');
+    then Caption := 'GpProfile 2017'+IFF(currentProject <> '',' - '+currentProject,'')
+    else Caption := 'GpProfile 2017'+IFF(currentProfile <> '',' - '+currentProfile,'')+IFF(loadCanceled,' (incomplete)','');
 end;
 
 procedure TfrmMain.SetSource;
@@ -2190,13 +2162,13 @@ begin
     then enabled := (currentProject <> '')
     else enabled := (currentProfile <> '');
   if enabled then begin
-    mwSource.Enabled := true;
-    mwSource.Color   := mwPasSyn1.SpaceAttri.Background;
+    sourceCodeEdit.Enabled := true;
+    sourceCodeEdit.Color   := SynPasSyn.SpaceAttri.Background;
   end
   else begin
     ClearSource;
-    mwSource.Enabled := false;
-    mwSource.Color   := clBtnFace;
+    sourceCodeEdit.Enabled := false;
+    sourceCodeEdit.Color   := clBtnFace;
   end;
 end;
 
@@ -2448,9 +2420,9 @@ begin
         setting := i;
         break;
       end;
-    mwPasSyn1.UseUserSettings(setting);
+    SynPasSyn.UseUserSettings(setting);
     SetSource;
-    mwSource.Invalidate;
+    sourceCodeEdit.Invalidate;
   finally s.Free; end;
 end; { TfrmMain.UseDelphiSettings }
 
@@ -3005,25 +2977,25 @@ begin
   ReloadSource;
 end;
 
-procedure TfrmMain.LoadSource(fileName: string; focusOn: integer);
+procedure TfrmMain.LoadSource(fileName: AnsiString; focusOn: integer);
 begin
   try
     if fileName <> '' then begin
       if fileName <> loadedSource then begin
-        mwSource.Lines.LoadFromFile(fileName);
+        sourceCodeEdit.Lines.LoadFromFile(fileName);
         loadedSource := fileName;
       end;
       if focusOn < 0 then focusOn := 0;
-      if focusOn >= mwSource.Lines.Count then focusOn := mwSource.Lines.Count-1;
-      mwSource.TopLine := focusOn+1;
+      if focusOn >= sourceCodeEdit.Lines.Count then focusOn := sourceCodeEdit.Lines.Count-1;
+      sourceCodeEdit.TopLine := focusOn+1;
       StatusPanel0(fileName,true);
     end;
-  except mwSource.Lines.Clear; end;
+  except sourceCodeEdit.Lines.Clear; end;
 end; { TfrmMain.LoadSource }
 
 procedure TfrmMain.ClearSource;
 begin
-  mwSource.Lines.Clear;
+  sourceCodeEdit.Lines.Clear;
   loadedSource := '';
   StatusPanel0('',true);
 end; { TfrmMain.ClearSource }
@@ -3203,6 +3175,8 @@ begin
 end;
 
 procedure TfrmMain.actMakeCopyProfileExecute(Sender: TObject);
+var
+  LLastError : cardinal;
 begin
   with SaveDialog1 do begin
     FileName := ButLast(openProfile.Name,Length(ExtractFileExt(openProfile.Name)))+
@@ -3211,8 +3185,16 @@ begin
     if Execute then begin
       if ExtractFileExt(FileName) = '' then FileName := FileName + '.prf';
       CopyFile(PChar(openProfile.Name),PChar(FileName),false);
-      MRUPrf.LatestFile := FileName;
-      MRUPrf.LatestFile := openProfile.Name;
+      LLastError := GetLastError();
+      if LLastError <> 0 then
+      begin
+        StatusPanel0(Format('Cannot copy file: %s',[SysErrorMessage(LLastError)]),false,true);
+        ShowMessage(Format('Cannot copy file: %s',[SysErrorMessage(LLastError)]));
+      else
+      begin
+        MRUPrf.LatestFile := FileName;
+        MRUPrf.LatestFile := openProfile.Name;
+      end
     end;
   end;
 end;
